@@ -52,7 +52,7 @@
 
   .stage{position:relative;border-radius:var(--radius);overflow:hidden;background:#0d1116;aspect-ratio:4/3;border:1px solid var(--line)}
   #reader{width:100%;height:100%}
-  #reader video{object-fit:cover !important}
+  #reader video{width:100%!important;height:100%!important;object-fit:cover}
   .stage-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:#8592a0;padding:24px}
   .stage-empty svg{opacity:.55;margin-bottom:10px}
   .scan-frame{position:absolute;inset:16% 14%;pointer-events:none;display:none}
@@ -73,6 +73,7 @@
   .btn-steel{background:var(--steel);color:#fff}
   .btn-block{width:100%;margin-top:12px}
   .row2{display:flex;gap:8px;margin-top:12px}
+  .scan-hint{display:none;margin-top:8px;font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5}
   .row2 .btn{flex:1}
   .filePrev{display:none;margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
   .filePrev.show{display:block}
@@ -157,6 +158,8 @@
     </div>
     <div class="scan-frame"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span><span class="scan-line"></span></div>
   </div>
+
+  <div class="scan-hint" id="scanHint">เล็งให้แถบบาร์โค้ดอยู่ในกรอบแนวนอน · ถือห่าง ~10–15 ซม. · แสงสว่างพอ</div>
 
   <div class="row2">
     <button class="btn btn-primary" id="camBtn">เปิดกล้อง (Camera)</button>
@@ -298,23 +301,38 @@
   function startCamera(){
     if(typeof Html5Qrcode==='undefined'){ toast('โหลดไลบรารีไม่ได้ — ต้องมีอินเทอร์เน็ตครั้งแรก'); return; }
     $('stageEmpty').style.display='none'; $('stage').classList.add('scanning');
-    scanner=new Html5Qrcode('reader',{verbose:false});
-    var cfg={fps:10,qrbox:function(w,h){var m=Math.floor(Math.min(w,h)*0.75);return {width:m,height:Math.floor(m*0.6)};},aspectRatio:1.333};
-    scanner.start({facingMode:'environment'},cfg,function(t){lookup(t);},function(){})
+    var opts={verbose:false};
+    if(typeof Html5QrcodeSupportedFormats!=='undefined'){
+      var F=Html5QrcodeSupportedFormats;
+      opts.formatsToSupport=[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.CODABAR,F.QR_CODE];
+    }
+    opts.experimentalFeatures={useBarCodeDetectorIfSupported:true};
+    scanner=new Html5Qrcode('reader',opts);
+    // wide, short scan window suits long EAN-13 barcodes
+    var cfg={ fps:15, qrbox:function(w,h){
+      var bw=Math.max(220,Math.floor(w*0.88));
+      var bh=Math.max(130,Math.floor(Math.min(h*0.55, bw*0.48)));
+      return {width:bw,height:bh};
+    } };
+    // request higher resolution so small/distant barcodes have enough pixels
+    var camConstraints={facingMode:'environment',width:{ideal:1920},height:{ideal:1080}};
+    scanner.start(camConstraints,cfg,function(t){lookup(t);},function(){})
     .then(function(){
       scanning=true; $('camBtn').textContent='ปิดกล้อง (Stop)';
       $('camBtn').classList.remove('btn-primary'); $('camBtn').classList.add('btn-steel');
+      $('scanHint').style.display='block';
       if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
     })
     .catch(function(err){
       $('stage').classList.remove('scanning'); $('stageEmpty').style.display='grid';
-      $('stageEmpty').innerHTML='<div style="color:#c0392b;font-size:14px;line-height:1.6">เปิดกล้องไม่ได้<br><span style="color:#8592a0;font-size:12.5px">ต้องเปิดผ่าน HTTPS บนมือถือ และอนุญาตสิทธิ์กล้อง<br>ระหว่างนี้พิมพ์บาร์โค้ด หรือใช้เครื่องสแกน USB/Bluetooth ได้</span></div>';
+      $('stageEmpty').innerHTML='<div style="color:#c0392b;font-size:14px;line-height:1.6">เปิดกล้องไม่ได้<br><span style="color:#8592a0;font-size:12.5px">ต้องเปิดผ่าน HTTPS บนมือถือ และอนุญาตสิทธิ์กล้อง<br>ระหว่างนี้พิมพ์บาร์โค้ด หรือใช้ปุ่ม “รูปจากมือถือ” ได้</span></div>';
       console.warn(err);
     });
   }
   function stopCamera(){
     if(scanner&&scanning){ scanner.stop().then(function(){scanner.clear();}).catch(function(){}); }
     scanning=false; $('stage').classList.remove('scanning'); $('stageEmpty').style.display='grid';
+    $('scanHint').style.display='none';
     $('stageEmpty').innerHTML='<svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5V3M17 5V3M3 9h18"/><path d="M8 13v3M11 13v3M14 13v3M17 13v3" stroke-width="1.2"/></svg><div>กดปุ่ม “เปิดกล้อง” เพื่อสแกน<br><span style="font-size:13px;opacity:.8">Tap to scan a barcode</span></div>';
     $('camBtn').textContent='เปิดกล้อง (Camera)'; $('camBtn').classList.add('btn-primary'); $('camBtn').classList.remove('btn-steel');
   }
