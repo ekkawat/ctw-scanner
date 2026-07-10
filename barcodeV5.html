@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1c2530">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="CTW Scan">
+<title>CTW Barcode Lookup</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --steel:#1c2530; --steel-2:#28323f;
+    --copper:#c06a3b; --copper-dk:#a2542b;
+    --surface:#f5f3f0; --card:#ffffff;
+    --line:#ded8d0; --ink:#232a31; --muted:#7d7b76;
+    --ok:#2f8f4e; --ok-bg:#eaf6ee; --danger:#c0392b; --danger-bg:#fbeae8;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:'Sarabun','Noto Sans Thai',-apple-system,'Segoe UI',sans-serif;
+    background:var(--surface); color:var(--ink); font-size:16px; line-height:1.4;
+    padding-bottom:calc(76px + env(safe-area-inset-bottom));
+  }
+  .mono{font-family:'JetBrains Mono','SF Mono',ui-monospace,monospace}
+
+  header{
+    background:var(--steel); color:#fff;
+    padding:13px 16px calc(12px + env(safe-area-inset-top)) 16px;
+    display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:20;
+  }
+  header .mark{
+    width:34px;height:34px;border-radius:9px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--copper),var(--copper-dk));
+    display:grid;place-items:center;font-weight:800;font-size:14px;letter-spacing:.5px;
+  }
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:11px;color:#9fb0c0;margin-top:1px}
+  header .dbn{margin-left:auto;text-align:right;font-size:11px;color:#9fb0c0}
+  header .dbn b{display:block;font-size:15px;color:#fff}
+
+  main{max-width:560px;margin:0 auto;padding:14px}
+  section.view{display:none}
+  section.view.on{display:block}
+
+  /* ===== bottom tab bar ===== */
+  .tabbar{
+    position:fixed;left:0;right:0;bottom:0;z-index:30;
+    background:rgba(255,255,255,.96);backdrop-filter:blur(8px);
+    border-top:1px solid var(--line);
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom)) 8px;
+  }
+  .tabbar .inner{max-width:560px;margin:0 auto;display:flex;gap:6px}
+  .tab{
+    flex:1;border:0;background:none;font-family:inherit;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:2px;
+    padding:7px 4px;border-radius:11px;color:var(--muted);font-size:11.5px;font-weight:600;
+  }
+  .tab svg{width:22px;height:22px}
+  .tab.on{color:var(--copper);background:#f8ede4}
+
+  /* ===== scan view ===== */
+  .stage{position:relative;border-radius:var(--radius);overflow:hidden;background:#0d1116;aspect-ratio:4/3;border:1px solid var(--line)}
+  #reader{width:100%;height:100%}
+  #reader video{width:100%!important;height:100%!important;object-fit:cover}
+  .stage-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:#8592a0;padding:24px}
+  .stage-empty svg{opacity:.55;margin-bottom:10px}
+  .scan-frame{position:absolute;inset:16% 8%;pointer-events:none;display:none}
+  .scanning .scan-frame{display:block}
+  .scan-frame .corner{position:absolute;width:26px;height:26px;border:3px solid var(--copper)}
+  .corner.tl{top:0;left:0;border-right:0;border-bottom:0;border-radius:8px 0 0 0}
+  .corner.tr{top:0;right:0;border-left:0;border-bottom:0;border-radius:0 8px 0 0}
+  .corner.bl{bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 8px}
+  .corner.br{bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 8px 0}
+  .scan-line{position:absolute;left:4%;right:4%;height:2px;top:0;background:linear-gradient(90deg,transparent,var(--copper),transparent);animation:sweep 2.2s ease-in-out infinite}
+  @keyframes sweep{0%{top:4%}50%{top:96%}100%{top:4%}}
+  @media (prefers-reduced-motion:reduce){.scan-line{animation:none;top:50%}}
+  .torch{
+    position:absolute;right:10px;bottom:10px;z-index:5;display:none;
+    width:44px;height:44px;border-radius:50%;border:0;cursor:pointer;
+    background:rgba(255,255,255,.16);color:#fff;font-size:20px;backdrop-filter:blur(4px);
+  }
+  .torch.avail{display:block}
+  .torch.on{background:var(--copper)}
+  .flash{position:absolute;inset:0;background:var(--ok);opacity:0;pointer-events:none;z-index:4}
+  .flash.go{animation:flash .4s ease-out}
+  @keyframes flash{0%{opacity:.55}100%{opacity:0}}
+
+  .scan-hint{display:none;margin-top:8px;font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5}
+
+  .btn{border:0;border-radius:11px;font-family:inherit;font-size:15px;font-weight:700;padding:13px 16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;line-height:1}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--copper);color:#fff}
+  .btn-primary:active{background:var(--copper-dk)}
+  .btn-steel{background:var(--steel);color:#fff}
+  .row2{display:flex;gap:8px;margin-top:12px}
+  .row2 .btn{flex:1}
+
+  .manual{margin-top:12px;display:flex;gap:8px}
+  .manual input{flex:1;border:1px solid var(--line);border-radius:11px;padding:13px 14px;font-size:16px;font-family:inherit;background:var(--card)}
+  .manual input:focus{outline:2px solid var(--copper);border-color:transparent}
+  .manual button{flex:0 0 auto;padding:13px 18px}
+
+  .filePrev{display:none;margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+  .filePrev.show{display:block}
+  .fp-label{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .fp-label button{border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;padding:0 4px}
+  #filePreviewImg{max-width:100%;max-height:300px;border-radius:8px;display:block;object-fit:contain}
+  #fileReader{display:none}
+
+  /* ===== result / detail card ===== */
+  .result{margin-top:14px;display:none}
+  .result.show{display:block;animation:pop .25s ease-out}
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .card.found{border-left:5px solid var(--ok)}
+  .card.miss{border-left:5px solid var(--danger)}
+  .card-top{padding:15px 16px 13px}
+  .eyebrow{font-size:11.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;gap:7px}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .dot.ok{background:var(--ok)} .dot.no{background:var(--danger)}
+  .pname{font-size:22px;font-weight:800;line-height:1.15;color:var(--steel)}
+  .psize{font-size:16px;font-weight:600;margin-top:3px;color:var(--copper-dk)}
+  .swatch{display:inline-flex;align-items:center;gap:7px;margin-top:10px;font-size:13.5px;font-weight:600;padding:4px 11px 4px 6px;border-radius:20px;border:1px solid var(--line);background:#faf8f5}
+  .swatch i{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.2);display:inline-block}
+  .detail{border-top:1px solid #eee9e2}
+  .drow{display:flex;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid #f1ede7;font-size:14px}
+  .drow:last-child{border-bottom:0}
+  .drow .k{color:var(--muted);flex:0 0 auto}
+  .drow .v{text-align:right;font-weight:600;word-break:break-word}
+  .miss .card-top{background:var(--danger-bg)}
+  .miss .pname{color:var(--danger);font-size:18px}
+  .miss .miss-code{font-size:15px;margin-top:6px}
+
+  .recent{margin-top:18px}
+  .recent h2, .lgroup{font-size:13px;margin:16px 0 8px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+  .ritem{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:7px;display:flex;justify-content:space-between;gap:10px;font-size:13px;cursor:pointer}
+  .ritem:active{background:#f4f1ec}
+  .ritem .rc{color:var(--muted)}
+  .ritem.no .rn{color:var(--danger)}
+
+  /* ===== list & search views ===== */
+  .searchbox{position:relative;margin-bottom:4px}
+  .searchbox input{
+    width:100%;border:1px solid var(--line);border-radius:12px;background:var(--card);
+    padding:14px 42px 14px 42px;font-size:16px;font-family:inherit;
+  }
+  .searchbox input:focus{outline:2px solid var(--copper);border-color:transparent}
+  .searchbox .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted)}
+  .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);font-size:19px;cursor:pointer;padding:4px 8px;display:none}
+  .searchbox .clear.show{display:block}
+  .rescount{font-size:12.5px;color:var(--muted);margin:8px 2px 10px}
+  .kbd-tip{font-size:12px;color:var(--muted);margin:6px 2px 0;line-height:1.5}
+
+  .pitem{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:11px 14px;margin-bottom:8px;cursor:pointer;
+  }
+  .pitem:active{background:#f4f1ec}
+  .pitem .p-bc{font-size:13px;color:var(--muted);letter-spacing:.5px}
+  .pitem .p-bc b{color:var(--copper-dk);font-weight:800;font-size:14.5px}
+  .pitem .p-name{font-size:17px;font-weight:800;color:var(--steel);line-height:1.25;margin-top:3px}
+  .pitem .p-det{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);margin-top:5px;flex-wrap:wrap}
+  .pitem .sw{width:15px;height:15px;border-radius:50%;border:1px solid rgba(0,0,0,.18);flex:0 0 auto;display:inline-block}
+  .pitem mark{background:#ffe9a8;color:inherit;border-radius:3px;padding:0 1px}
+
+  .detail-overlay{
+    position:fixed;inset:0;z-index:40;display:none;
+    background:rgba(20,25,32,.45);
+  }
+  .detail-overlay.show{display:flex;align-items:flex-end;justify-content:center}
+  .sheet{
+    background:var(--surface);width:100%;max-width:560px;
+    border-radius:18px 18px 0 0;padding:10px 14px calc(16px + env(safe-area-inset-bottom));
+    max-height:82vh;overflow:auto;animation:up .22s ease-out;
+  }
+  @keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+  .sheet .grab{width:40px;height:4px;border-radius:2px;background:#cfc9c1;margin:2px auto 10px}
+  .sheet-close{width:100%;margin-top:12px}
+
+  .empty{padding:30px 16px;text-align:center;color:var(--muted);font-size:14px}
+
+  .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:var(--steel);color:#fff;padding:10px 18px;border-radius:30px;font-size:13.5px;opacity:0;transition:.25s;z-index:60;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.2)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <div class="mark">CTW</div>
+  <div>
+    <h1>ค้นหาสายไฟจากบาร์โค้ด</h1>
+    <div class="sub">Charoong Thai Wire &amp; Cable</div>
+  </div>
+  <div class="dbn"><b id="dbCount">0</b>รายการ <span id="syncBtn" style="text-decoration:underline;cursor:pointer">↻ อัปเดต</span></div>
+</header>
+
+<main>
+  <!-- ============ VIEW: SCAN ============ -->
+  <section class="view on" id="view-scan">
+    <div class="stage" id="stage">
+      <div id="reader"></div>
+      <div class="stage-empty" id="stageEmpty">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5V3M17 5V3M3 9h18"/>
+          <path d="M8 13v3M11 13v3M14 13v3M17 13v3" stroke-width="1.2"/>
+        </svg>
+        <div>กดปุ่ม “เปิดกล้อง” เพื่อสแกน<br><span style="font-size:13px;opacity:.8">Tap to scan a barcode</span></div>
+      </div>
+      <div class="scan-frame"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span><span class="scan-line"></span></div>
+      <button class="torch" id="torchBtn" title="ไฟฉาย">🔦</button>
+      <div class="flash" id="flash"></div>
+    </div>
+    <div class="scan-hint" id="scanHint">เล็งให้แถบบาร์โค้ดพาดขวางกรอบ · ถือห่าง ~10–15 ซม. · ถือนิ่งรอโฟกัส 1–2 วินาที</div>
+
+    <div class="row2">
+      <button class="btn btn-primary" id="camBtn">เปิดกล้อง (Camera)</button>
+      <button class="btn btn-steel" id="fileBtn">🖼️ รูปจากมือถือ</button>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+
+    <div class="filePrev" id="filePreview">
+      <div class="fp-label"><span>รูปที่เลือก (Selected image)</span><button id="fileClose" title="ปิด">✕</button></div>
+      <img id="filePreviewImg" alt="">
+      <div id="fileReader"></div>
+    </div>
+
+    <div class="manual">
+      <input id="manualInput" inputmode="numeric" autocomplete="off" placeholder="พิมพ์บาร์โค้ดเต็ม แล้วกดค้นหา">
+      <button class="btn btn-steel" id="manualBtn">ค้นหา</button>
+    </div>
+
+    <div class="result" id="result"></div>
+
+    <div class="recent" id="recentWrap" style="display:none">
+      <h2>ค้นหาล่าสุด (Recent)</h2>
+      <div id="recentList"></div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: LIST ============ -->
+  <section class="view" id="view-list">
+    <div class="searchbox">
+      <span class="icon">⌕</span>
+      <input id="listFilter" autocomplete="off" placeholder="กรองรายการ เช่น THW, VCT, 2.5, RED">
+      <button class="clear" id="listClear">✕</button>
+    </div>
+    <div class="rescount" id="listCount"></div>
+    <div id="listBody"></div>
+  </section>
+
+  <!-- ============ VIEW: SEARCH ============ -->
+  <section class="view" id="view-search">
+    <div class="searchbox">
+      <span class="icon">#</span>
+      <input id="bcSearch" inputmode="numeric" autocomplete="off" placeholder="พิมพ์บางส่วนของบาร์โค้ด เช่น 4062">
+      <button class="clear" id="bcClear">✕</button>
+    </div>
+    <div class="kbd-tip">พิมพ์แค่เลขท้าย 3–5 หลักบนฉลากก็พอ ระบบจะหารายการที่ตรงให้ทันที (บาร์โค้ด CTW ขึ้นต้น 8859866 เหมือนกันหมด)</div>
+    <div class="rescount" id="bcCount"></div>
+    <div id="bcBody"></div>
+  </section>
+</main>
+
+<!-- detail bottom sheet (for list/search taps) -->
+<div class="detail-overlay" id="detailOverlay">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div id="sheetBody"></div>
+    <button class="btn btn-steel sheet-close" id="sheetClose">ปิด (Close)</button>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <div class="inner">
+    <button class="tab on" data-view="scan" id="tab-scan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 12h8" stroke-linecap="round"/></svg>
+      สแกน
+    </button>
+    <button class="tab" data-view="list" id="tab-list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13" stroke-linecap="round"/><circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
+      รายการ
+    </button>
+    <button class="tab" data-view="search" id="tab-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5" stroke-linecap="round"/></svg>
+      ค้นหา
+    </button>
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  // ====== EMBEDDED DATABASE (snapshot from Google Sheet) ======
+  var PRODUCTS = [{"barcode":"8859866400019","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400026","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866400033","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400040","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400057","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400064","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400071","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866400088","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400095","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400101","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400118","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866400125","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400132","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400149","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400156","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400163","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866400170","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400187","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400194","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400200","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866400217","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400224","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400231","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400248","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400255","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866400262","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400279","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400286","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400293","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866400309","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400316","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400323","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400330","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400347","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866400354","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400361","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400378","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400385","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866400392","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400408","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400415","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400422","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400439","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866400446","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400453","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400460","name":"60227 IEC 01 (THW)","size":"1 x 16 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014016","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400477","name":"60227 IEC 01 (THW)","size":"1 x 25 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014025","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400484","name":"60227 IEC 01 (THW)","size":"1 x 35 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014035","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400491","name":"60227 IEC 01 (THW)","size":"1 x 50 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014050","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400507","name":"VAF","size":"2 x 1 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021001","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400514","name":"VAF","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021501","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400521","name":"VAF","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021502","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400538","name":"VAF","size":"2 x 4 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024004","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400545","name":"VAF","size":"2 x 1 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021001","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866400552","name":"VAF","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021501","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866400569","name":"VAF","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021502","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866400576","name":"VAF","size":"2 x 4 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024004","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866400583","name":"VAF","size":"2 x 1 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021001","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866400590","name":"VAF","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021501","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866400606","name":"VAF","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021502","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866400613","name":"VAF","size":"2 x 4 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024004","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866400620","name":"VCT","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026501","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866400637","name":"VCT","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026502","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866400644","name":"THWA : NON-COMPACT","size":"16 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300016","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400651","name":"THWA : NON-COMPACT","size":"25 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300025","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400668","name":"VAF","size":"2 x 1 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021001","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866400675","name":"VAF","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021501","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866400682","name":"VAF","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01L7021502","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866400699","name":"VAF","size":"2 x 4 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024004","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866400705","name":"60227 IEC 01 (THW)","size":"1 x 16 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014016","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400712","name":"NYY","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0186014010","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400750","name":"60227 IEC 01 (THW)","size":"1 x 240 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014240","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400767","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400774","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400781","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400798","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400804","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400811","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400828","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400835","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400842","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400859","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400866","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400873","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866400880","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400897","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400903","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400910","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400927","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400934","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400941","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866400958","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866400965","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866400972","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866400989","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866400996","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401009","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401016","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866401023","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"","packing":"100 M/COIL"},{"barcode":"8859866401030","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866401047","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866401054","name":"60227 IEC 06 (VSF)","size":"1 x 0.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016005","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401061","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401078","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"GREEN","packing":"100 M/COIL"},{"barcode":"8859866401085","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401092","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"RED","packing":"100 M/COIL"},{"barcode":"8859866401108","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"LIGHT BLUE","packing":"100 M/COIL"},{"barcode":"8859866401115","name":"60227 IEC 06 (VSF)","size":"1 x 1 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I3016001","colour":"YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401122","name":"CV 0.6/1 kV","size":"1 x 120 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0028018120","colour":"","packing":""},{"barcode":"8859866401139","name":"NYY","size":"2 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186021501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401146","name":"NYY","size":"2 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186021502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401153","name":"NYY","size":"2 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186021004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401160","name":"NYY","size":"3 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186031501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401177","name":"NYY","size":"3 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186031502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401184","name":"NYY","size":"3 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0186031004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401191","name":"VCT","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026001","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401207","name":"VCT","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026001","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401214","name":"VCT","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026501","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401221","name":"VCT","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401238","name":"VCT","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026502","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401245","name":"VCT","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401252","name":"VCT","size":"2 x 4 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401269","name":"VCT","size":"2 x 6 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026006","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401276","name":"VCT","size":"3 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036001","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401283","name":"VCT","size":"3 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036001","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401290","name":"VCT","size":"3 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036501","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401306","name":"VCT","size":"3 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401313","name":"VCT","size":"3 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036502","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401320","name":"VCT","size":"3 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401337","name":"VCT","size":"3 x 4 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401344","name":"VCT","size":"3 x 6 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036006","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401351","name":"VCT","size":"4 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046001","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401368","name":"VCT","size":"4 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046001","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401375","name":"VCT","size":"4 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046501","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401382","name":"VCT","size":"4 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046501","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401399","name":"VCT","size":"4 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046502","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401405","name":"VCT","size":"4 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046502","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401412","name":"VCT","size":"4 x 4 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046004","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401429","name":"VCT","size":"4 x 6 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5046006","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401443","name":"VAF","size":"2 x 16 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024016","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401450","name":"VAF","size":"2 x 6 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024006","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401467","name":"VAF-G","size":"2 x 1.5/1.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01J3021501","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401474","name":"VAF-G","size":"2 x 2.5/2.5 SQ.MM.","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C01J3021502","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401481","name":"VAF-G","size":"2 x 4/4 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01J3024004","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401498","name":"60227 IEC 01 (THW)","size":"1 x 120 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014120","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401504","name":"60227 IEC 01 (THW)","size":"1 x 70 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014070","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401511","name":"60227 IEC 01 (THW)","size":"1 x 95 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014095","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401528","name":"THWA : NON-COMPACT","size":"10 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300010","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401535","name":"THWA : NON-COMPACT","size":"10 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300010","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401542","name":"THWA : NON-COMPACT","size":"16 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300016","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401559","name":"THWA : NON-COMPACT","size":"25 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300025","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401566","name":"THWA : NON-COMPACT","size":"35 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300035","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401573","name":"THWA : NON-COMPACT","size":"35 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300035","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401580","name":"THWA : NON-COMPACT","size":"50 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300050","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401597","name":"THWA : NON-COMPACT","size":"70 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300070","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401603","name":"THWA : NON-COMPACT","size":"95 SQ.MM.","conductor":"ตัวนำตีเกลียวไม่อัดแน่น (Strand Non-Compact)","code":"A0070300095","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401610","name":"60227 IEC 52 (VKF)","size":"2 x 0.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I9026005","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401627","name":"60227 IEC 52 (VKF)","size":"2 x 0.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I9026005","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866401634","name":"60227 IEC 53 (VKF)","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C0188026001","colour":"BLACK","packing":"100 M/COIL"},{"barcode":"8859866401641","name":"60227 IEC 53 (VKF)","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C0188026001","colour":"SLATE","packing":"100 M/COIL"},{"barcode":"8859866401658","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401665","name":"60227 IEC 02 THW(F)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016501","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866401672","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401689","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866401696","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401702","name":"60227 IEC 02 THW(F)","size":"1 x 4 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016004","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866401719","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401726","name":"60227 IEC 02 THW(F)","size":"1 x 6 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016006","colour":"BROWN","packing":"100 M/COIL"},{"barcode":"8859866401733","name":"60227 IEC 01 (THW)","size":"1 x 25 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014025","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401740","name":"60227 IEC 01 (THW)","size":"1 x 35 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014035","colour":"GREEN/YELLOW","packing":"100 M/COIL"},{"barcode":"8859866401757","name":"VAF","size":"2 x 10 SQ.MM.","conductor":"ตัวนำตีเกลียว (Strand)","code":"C01L7024010","colour":"WHITE","packing":"100 M/COIL"},{"barcode":"8859866401764","name":"60227 IEC 01 (THW)","size":"1 x 16 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014016","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866401771","name":"60227 IEC 01 (THW)","size":"1 x 16 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014016","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401788","name":"VCT","size":"2 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026501","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866401795","name":"VCT","size":"2 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026502","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866401801","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866401818","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BROWN","packing":"20 M/COIL"},{"barcode":"8859866401825","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"LIGHT BLUE","packing":"20 M/COIL"},{"barcode":"8859866401832","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN","packing":"20 M/COIL"},{"barcode":"8859866401849","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN/YELLOW","packing":"20 M/COIL"},{"barcode":"8859866401856","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"RED","packing":"20 M/COIL"},{"barcode":"8859866401863","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"SLATE","packing":"20 M/COIL"},{"barcode":"8859866401870","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866401887","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866401894","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BROWN","packing":"30 M/COIL"},{"barcode":"8859866401900","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"LIGHT BLUE","packing":"30 M/COIL"},{"barcode":"8859866401917","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN","packing":"30 M/COIL"},{"barcode":"8859866401924","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN/YELLOW","packing":"30 M/COIL"},{"barcode":"8859866401931","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"RED","packing":"30 M/COIL"},{"barcode":"8859866401948","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"SLATE","packing":"30 M/COIL"},{"barcode":"8859866401955","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866401962","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866401979","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"BROWN","packing":"50 M/COIL"},{"barcode":"8859866401986","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"LIGHT BLUE","packing":"50 M/COIL"},{"barcode":"8859866401993","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN","packing":"50 M/COIL"},{"barcode":"8859866402006","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402013","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"RED","packing":"50 M/COIL"},{"barcode":"8859866402020","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"SLATE","packing":"50 M/COIL"},{"barcode":"8859866402037","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866402044","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402051","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BROWN","packing":"20 M/COIL"},{"barcode":"8859866402068","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"LIGHT BLUE","packing":"20 M/COIL"},{"barcode":"8859866402075","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN","packing":"20 M/COIL"},{"barcode":"8859866402082","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN/YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402099","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"RED","packing":"20 M/COIL"},{"barcode":"8859866402105","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"SLATE","packing":"20 M/COIL"},{"barcode":"8859866402112","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866402129","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402136","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BROWN","packing":"30 M/COIL"},{"barcode":"8859866402143","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"LIGHT BLUE","packing":"30 M/COIL"},{"barcode":"8859866402150","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN","packing":"30 M/COIL"},{"barcode":"8859866402167","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN/YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402174","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"RED","packing":"30 M/COIL"},{"barcode":"8859866402181","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"SLATE","packing":"30 M/COIL"},{"barcode":"8859866402198","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866402204","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402211","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"BROWN","packing":"50 M/COIL"},{"barcode":"8859866402228","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"LIGHT BLUE","packing":"50 M/COIL"},{"barcode":"8859866402235","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN","packing":"50 M/COIL"},{"barcode":"8859866402242","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402259","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"RED","packing":"50 M/COIL"},{"barcode":"8859866402266","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"SLATE","packing":"50 M/COIL"},{"barcode":"8859866402273","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866402280","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"GREEN/YELLOW","packing":"200 M/COIL"},{"barcode":"8859866402297","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"LIGHT BLUE","packing":"20 M/COIL"},{"barcode":"8859866402303","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BROWN","packing":"20 M/COIL"},{"barcode":"8859866402310","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN","packing":"30 M/COIL"},{"barcode":"8859866402327","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BROWN","packing":"30 M/COIL"},{"barcode":"8859866402334","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"LIGHT BLUE","packing":"30 M/COIL"},{"barcode":"8859866402341","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402358","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"RED","packing":"50 M/COIL"},{"barcode":"8859866402365","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BROWN","packing":"50 M/COIL"},{"barcode":"8859866402372","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"LIGHT BLUE","packing":"50 M/COIL"},{"barcode":"8859866402389","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402396","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BROWN","packing":"20 M/COIL"},{"barcode":"8859866402402","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"LIGHT BLUE","packing":"20 M/COIL"},{"barcode":"8859866402419","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN/YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402426","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402433","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BROWN","packing":"50 M/COIL"},{"barcode":"8859866402440","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"LIGHT BLUE","packing":"50 M/COIL"},{"barcode":"8859866402457","name":"60227 IEC 01 (THW)","size":"1 x 35 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014035","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402464","name":"VCT","size":"3 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036502","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402471","name":"VCT","size":"3 x 2.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036502","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402488","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402495","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN","packing":"20 M/COIL"},{"barcode":"8859866402501","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN","packing":"30 M/COIL"},{"barcode":"8859866402518","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN","packing":"50 M/COIL"},{"barcode":"8859866402525","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN/YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402532","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402549","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"RED","packing":"20 M/COIL"},{"barcode":"8859866402556","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"RED","packing":"30 M/COIL"},{"barcode":"8859866402563","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"RED","packing":"50 M/COIL"},{"barcode":"8859866402570","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"SLATE","packing":"20 M/COIL"},{"barcode":"8859866402587","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"SLATE","packing":"30 M/COIL"},{"barcode":"8859866402594","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"SLATE","packing":"50 M/COIL"},{"barcode":"8859866402600","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866402617","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866402624","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866402631","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"RED","packing":"30 M/COIL"},{"barcode":"8859866402648","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402655","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402662","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN/YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402679","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN","packing":"50 M/COIL"},{"barcode":"8859866402686","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"SLATE","packing":"30 M/COIL"},{"barcode":"8859866402693","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"SLATE","packing":"50 M/COIL"},{"barcode":"8859866402709","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"WHITE","packing":"30 M/COIL"},{"barcode":"8859866402716","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"WHITE","packing":"50 M/COIL"},{"barcode":"8859866402723","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"BROWN","packing":"30 M/COIL"},{"barcode":"8859866402730","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"LIGHT BLUE","packing":"30 M/COIL"},{"barcode":"8859866402747","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402754","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402761","name":"60227 IEC 01 (THW)","size":"1 x 1.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011501","colour":"YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402778","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402785","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402792","name":"60227 IEC 01 (THW)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011502","colour":"YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402808","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402815","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN","packing":"20 M/COIL"},{"barcode":"8859866402822","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"GREEN/YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402839","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"RED","packing":"20 M/COIL"},{"barcode":"8859866402846","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"SLATE","packing":"20 M/COIL"},{"barcode":"8859866402853","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"WHITE","packing":"20 M/COIL"},{"barcode":"8859866402860","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402877","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402884","name":"60227 IEC 01 (THW)","size":"1 x 4 SQ.MM","conductor":"ตัวนำเส้นเดี่ยว (Solid)","code":"C0185011004","colour":"YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402891","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"YELLOW","packing":"20 M/COIL"},{"barcode":"8859866402907","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"YELLOW","packing":"30 M/COIL"},{"barcode":"8859866402914","name":"60227 IEC 01 (THW)","size":"1 x 6 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014006","colour":"YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402921","name":"VCT","size":"3 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036501","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402938","name":"VCT","size":"3 x 1.5 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5036501","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402945","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402952","name":"60227 IEC 01 (THW)","size":"1 x 10 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014010","colour":"GREEN/YELLOW","packing":"50 M/COIL"},{"barcode":"8859866402969","name":"60227 IEC 01 (THW)","size":"1 x 25 SQ.MM","conductor":"ตัวนำตีเกลียว (Strand)","code":"C0185014025","colour":"BLACK","packing":"50 M/COIL"},{"barcode":"8859866402976","name":"VCT","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026001","colour":"BLACK","packing":"20 M/COIL"},{"barcode":"8859866402983","name":"VCT","size":"2 x 1 SQ.MM.","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01J5026001","colour":"BLACK","packing":"30 M/COIL"},{"barcode":"8859866402990","name":"60227 IEC 02 THW(F)","size":"1 x 2.5 SQ.MM","conductor":"ตัวนำอ่อนตีเกลียว (Flexible)","code":"C01I1016502","colour":"SLATE","packing":"100 M/COIL"}];
+  // ====== CONFIG: data source is LOCKED here. Only someone who can edit this
+  //         file can change it. End users cannot point the app elsewhere. ======
+  // Works when the sheet is shared "Anyone with the link → Viewer". Or replace
+  // with a Publish-to-web CSV URL ("https://docs.google.com/.../pub?output=csv").
+  var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQaEMMrbxOj88hRAIhSS8qp5v71BW5pbnL--JIuWXIVh9w60kGC8oYSxba6pJarhyDCLdFhaLOoPCJK/pub?gid=0&single=true&output=csv";
+
+  var index = {}, recent = [], scanner = null, scanning = false, torchOn = false;
+  var lastCode = '', lastTime = 0, audioCtx = null;
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ================= shared helpers ================= */
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function beep(ok){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==='suspended') audioCtx.resume();
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type='square';
+      o.frequency.value = ok?1050:280; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(.001,audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.5,audioCtx.currentTime+.01);
+      g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+.25);
+      o.start(); o.stop(audioCtx.currentTime+.26);
+    }catch(e){}
+  }
+  function buzz(ms){ if(navigator.vibrate) navigator.vibrate(ms||120); }
+  function flashOk(){
+    var f=$('flash'); if(!f) return;
+    f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+  }
+  function toast(m){ var t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(function(){t.classList.remove('show');},1800); }
+
+  var COLOURS = {'BLACK':'#222','BROWN':'#6b4423','RED':'#c0392b','GREEN':'#2f8f4e',
+    'YELLOW':'#f1c40f','WHITE':'#ffffff','LIGHT BLUE':'#6db3e8','BLUE':'#2d6fb5',
+    'SLATE':'#6a7b8a','GREEN/YELLOW':'linear-gradient(135deg,#2f8f4e 50%,#f1c40f 50%)'};
+  function colourCss(colour){ return COLOURS[(colour||'').toUpperCase()] || '#bbb'; }
+  function swatchHtml(colour){
+    if(!colour) return '';
+    return '<span class="swatch"><i style="background:'+colourCss(colour)+'"></i>'+esc(colour)+'</span>';
+  }
+  function drow(k,v,mono){ return '<div class="drow"><span class="k">'+k+'</span><span class="v'+(mono?' mono':'')+'">'+esc(v||'-')+'</span></div>'; }
+  function foundCardHtml(code,p){
+    return '<div class="card found"><div class="card-top">'
+      + '<div class="eyebrow"><span class="dot ok"></span>พบในระบบ (Found)</div>'
+      + '<div class="pname">'+esc(p.name||'-')+'</div>'
+      + '<div class="psize">'+esc(p.size||'')+'</div>'
+      + swatchHtml(p.colour)
+      + '</div><div class="detail">'
+      + drow('ตัวนำ (Conductor)', p.conductor)
+      + drow('รหัสสินค้า (Product Code)', p.code, true)
+      + drow('บรรจุ (Packing)', p.packing)
+      + drow('บาร์โค้ด (GTIN)', code, true)
+      + '</div></div>';
+  }
+
+  function buildIndex(list){
+    index = {};
+    list.forEach(function(p){ if(p.barcode) index[String(p.barcode).trim()] = p; });
+    $('dbCount').textContent = list.length;
+    renderList($('listFilter').value);
+    renderBcSearch($('bcSearch').value);
+  }
+
+  /* ================= tab navigation ================= */
+  function switchView(name){
+    ['scan','list','search'].forEach(function(v){
+      $('view-'+v).classList.toggle('on', v===name);
+      $('tab-'+v).classList.toggle('on', v===name);
+    });
+    if(name!=='scan' && scanning) stopCamera();   // release camera when leaving
+    if(name==='search') setTimeout(function(){ $('bcSearch').focus(); }, 60);
+  }
+  ['scan','list','search'].forEach(function(v){
+    $('tab-'+v).addEventListener('click',function(){ switchView(v); });
+  });
+
+  /* ================= lookup (scan view) ================= */
+  function normalize(code){ return String(code||'').replace(/[^0-9A-Za-z]/g,'').trim(); }
+  function lookup(raw){
+    var code = normalize(raw);
+    if(!code) return;
+    var now=Date.now();
+    if(code===lastCode && (now-lastTime)<2500) return;   // ignore repeats within 2.5s
+    lastCode=code; lastTime=now;
+    var p = index[code];
+    if(p){ beep(true); buzz(120); flashOk(); showFound(code,p); pushRecent(code,p); }
+    else { beep(false); buzz([60,60,60]); showMiss(code); pushRecent(code,null); }
+  }
+  function showFound(code,p){
+    var r=$('result'); r.innerHTML=foundCardHtml(code,p); r.classList.add('show');
+    r.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  function showMiss(code){
+    var r=$('result');
+    r.innerHTML='<div class="card miss"><div class="card-top">'
+      + '<div class="eyebrow"><span class="dot no"></span>ไม่พบในระบบ (Not found)</div>'
+      + '<div class="pname">ไม่พบบาร์โค้ดนี้</div>'
+      + '<div class="miss-code mono">'+esc(code)+'</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:8px">ลองแท็บ “ค้นหา” พิมพ์เลขท้ายบาร์โค้ด หรือกด ↻ อัปเดตข้อมูล</div>'
+      + '</div></div>';
+    r.classList.add('show');
+    r.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  function pushRecent(code,p){
+    recent.unshift({code:code,name:p?p.name+' '+(p.size||''):null});
+    if(recent.length>8) recent.pop();
+    var w=$('recentWrap'), l=$('recentList');
+    w.style.display='block';
+    l.innerHTML = recent.map(function(x){
+      return '<div class="ritem'+(x.name?'':' no')+'" data-code="'+esc(x.code)+'">'
+        + '<span class="rn">'+(x.name?esc(x.name):'ไม่พบ')+'</span>'
+        + '<span class="rc mono">'+esc(x.code)+'</span></div>';
+    }).join('');
+    Array.prototype.forEach.call(l.querySelectorAll('.ritem'),function(el){
+      el.addEventListener('click',function(){ lastCode=''; lookup(el.dataset.code); });
+    });
+  }
+
+  /* ================= camera ================= */
+  function startCamera(){
+    if(typeof Html5Qrcode==='undefined'){ toast('โหลดไลบรารีไม่ได้ — ต้องมีอินเทอร์เน็ตครั้งแรก'); return; }
+    $('stageEmpty').style.display='none'; $('stage').classList.add('scanning');
+    var opts={verbose:false};
+    if(typeof Html5QrcodeSupportedFormats!=='undefined'){
+      var F=Html5QrcodeSupportedFormats;
+      // linear (1D) barcodes only — no QR
+      opts.formatsToSupport=[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.CODABAR];
+    }
+    opts.experimentalFeatures={useBarCodeDetectorIfSupported:true};
+    scanner=new Html5Qrcode('reader',opts);
+    function onDecode(t){
+      lookup(t);
+      // pause the camera for 2s so the same coil is not scanned twice
+      if(scanner && scanning){
+        try{ scanner.pause(true); }catch(e){}
+        setTimeout(function(){ try{ if(scanner && scanning) scanner.resume(); }catch(e){} }, 2000);
+      }
+    }
+    var cfg={ fps:15, qrbox:function(w,h){
+      var bw=Math.max(220,Math.floor(w*0.88));
+      var bh=Math.max(130,Math.floor(Math.min(h*0.55, bw*0.48)));
+      return {width:bw,height:bh};
+    } };
+    cfg.videoConstraints={facingMode:'environment',width:{ideal:1920},height:{ideal:1080}};
+    function begin(config){
+      return scanner.start({facingMode:'environment'},config,onDecode,function(){});
+    }
+    begin(cfg)
+    .catch(function(){
+      var plain={ fps:10, qrbox:cfg.qrbox };
+      return begin(plain);
+    })
+    .then(function(){
+      scanning=true; $('camBtn').textContent='ปิดกล้อง (Stop)';
+      $('camBtn').classList.remove('btn-primary'); $('camBtn').classList.add('btn-steel');
+      $('scanHint').style.display='block';
+      setupTorch();
+      if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+    })
+    .catch(function(err){
+      $('stage').classList.remove('scanning'); $('stageEmpty').style.display='grid';
+      $('stageEmpty').innerHTML='<div style="color:#c0392b;font-size:14px;line-height:1.6">เปิดกล้องไม่ได้<br><span style="color:#8592a0;font-size:12.5px">ต้องเปิดผ่าน HTTPS และอนุญาตสิทธิ์กล้อง<br>ใช้ปุ่ม “รูปจากมือถือ” หรือแท็บ “ค้นหา” แทนได้</span></div>';
+      console.warn(err);
+    });
+  }
+  function stopCamera(){
+    if(scanner&&scanning){ scanner.stop().then(function(){scanner.clear();}).catch(function(){}); }
+    scanning=false; torchOn=false;
+    $('torchBtn').classList.remove('avail','on');
+    $('stage').classList.remove('scanning'); $('stageEmpty').style.display='grid';
+    $('scanHint').style.display='none';
+    $('stageEmpty').innerHTML='<svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5V3M17 5V3M3 9h18"/><path d="M8 13v3M11 13v3M14 13v3M17 13v3" stroke-width="1.2"/></svg><div>กดปุ่ม “เปิดกล้อง” เพื่อสแกน<br><span style="font-size:13px;opacity:.8">Tap to scan a barcode</span></div>';
+    $('camBtn').textContent='เปิดกล้อง (Camera)'; $('camBtn').classList.add('btn-primary'); $('camBtn').classList.remove('btn-steel');
+  }
+  function setupTorch(){
+    try{
+      var caps = scanner.getRunningTrackCapabilities && scanner.getRunningTrackCapabilities();
+      if(caps && caps.torch){ $('torchBtn').classList.add('avail'); }
+    }catch(e){}
+  }
+  $('torchBtn').addEventListener('click',function(){
+    if(!scanner||!scanning) return;
+    torchOn = !torchOn;
+    scanner.applyVideoConstraints({advanced:[{torch:torchOn}]})
+      .then(function(){ $('torchBtn').classList.toggle('on',torchOn); })
+      .catch(function(){ torchOn=false; toast('เครื่องนี้ไม่รองรับไฟฉายผ่านเว็บ'); });
+  });
+  $('camBtn').addEventListener('click',function(){ scanning?stopCamera():startCamera(); });
+
+  /* ---- scan from a photo on the phone ---- */
+  $('fileBtn').addEventListener('click',function(){ $('fileInput').click(); });
+  $('fileClose').addEventListener('click',function(){
+    $('filePreview').classList.remove('show');
+    var img=$('filePreviewImg'); if(img._url){ URL.revokeObjectURL(img._url); img._url=''; } img.removeAttribute('src');
+    $('fileReader').innerHTML='';
+  });
+  $('fileInput').addEventListener('change',function(){
+    var f = this.files && this.files[0];
+    this.value = '';
+    if(f) scanFromImage(f);
+  });
+  function downscale(file, maxDim){
+    return new Promise(function(res,rej){
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function(){
+        var w=img.naturalWidth, h=img.naturalHeight, m=Math.max(w,h);
+        if(m<=maxDim){ URL.revokeObjectURL(url); res(file); return; }
+        var s=maxDim/m;
+        var c=document.createElement('canvas');
+        c.width=Math.round(w*s); c.height=Math.round(h*s);
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function(b){
+          if(!b){ res(file); return; }
+          res(new File([b],'scan.jpg',{type:'image/jpeg'}));
+        },'image/jpeg',0.92);
+      };
+      img.onerror=function(){ URL.revokeObjectURL(url); rej(new Error('img load')); };
+      img.src=url;
+    });
+  }
+  function scanFromImage(file){
+    if(typeof Html5Qrcode==='undefined'){ toast('โหลดไลบรารีไม่ได้ — ต้องมีอินเทอร์เน็ตครั้งแรก'); return; }
+    if(scanning) stopCamera();
+    $('filePreview').classList.add('show');
+    var img = $('filePreviewImg');
+    if(img._url) { URL.revokeObjectURL(img._url); }
+    img._url = URL.createObjectURL(file);
+    img.src = img._url;
+    $('fileReader').innerHTML='';
+    toast('กำลังอ่านรูป…');
+    var fopts={verbose:false};
+    if(typeof Html5QrcodeSupportedFormats!=='undefined'){
+      var F=Html5QrcodeSupportedFormats;
+      fopts.formatsToSupport=[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.CODABAR];
+    }
+    var fscan = new Html5Qrcode('fileReader',fopts);
+    // try progressively smaller versions — huge photos decode worse than ~1000–1600px
+    var sizes=[1600,1100,800];
+    function attempt(i){
+      if(i>=sizes.length) return Promise.reject(new Error('all sizes failed'));
+      return downscale(file, sizes[i])
+        .then(function(f2){ return fscan.scanFile(f2, false); })
+        .catch(function(){ return attempt(i+1); });
+    }
+    attempt(0)
+      .then(function(text){ lastCode=''; lookup(text); })
+      .catch(function(err){
+        beep(false); buzz([60,60,60]);
+        toast('ไม่พบบาร์โค้ดในรูป — ลองครอปให้เห็นเฉพาะแถบบาร์โค้ดชัดๆ');
+        console.warn('scanFile:', err);
+      })
+      .then(function(){ try{ fscan.clear(); }catch(e){} });
+  }
+
+  $('manualBtn').addEventListener('click',function(){ var v=$('manualInput').value; $('manualInput').value=''; lastCode=''; lookup(v); });
+  $('manualInput').addEventListener('keydown',function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); var v=this.value; this.value=''; lastCode=''; lookup(v); } });
+
+  /* ================= list view ================= */
+  function itemHtml(p, hl){
+    function mark(txt){
+      if(!hl || !txt) return esc(txt||'');
+      var i = txt.toLowerCase().indexOf(hl.toLowerCase());
+      if(i<0) return esc(txt);
+      return esc(txt.slice(0,i))+'<mark>'+esc(txt.slice(i,i+hl.length))+'</mark>'+esc(txt.slice(i+hl.length));
+    }
+    return '<div class="pitem" data-code="'+esc(p.barcode)+'">'
+      + '<div class="p-bc mono">'+mark(p.barcode.slice(0,8))+'<b>'+mark(p.barcode.slice(8))+'</b></div>'
+      + '<div class="p-name">'+mark(p.name)+' · '+mark(p.size)+'</div>'
+      + '<div class="p-det"><span class="sw" style="background:'+colourCss(p.colour)+'"></span>'
+      + esc(p.colour||'-')+' · '+esc(p.packing||'-')+' · <span class="mono">'+mark(p.code)+'</span></div>'
+      + '</div>';
+  }
+  function bindItems(container){
+    Array.prototype.forEach.call(container.querySelectorAll('.pitem'),function(el){
+      el.addEventListener('click',function(){ openDetail(el.dataset.code); });
+    });
+  }
+  function renderList(q){
+    q = (q||'').trim().toLowerCase();
+    var items = PRODUCTS.filter(function(p){
+      if(!q) return true;
+      return (p.name+' '+p.size+' '+p.colour+' '+p.code+' '+p.conductor+' '+p.packing+' '+p.barcode).toLowerCase().indexOf(q)>-1;
+    });
+    $('listCount').textContent = q ? 'พบ '+items.length+' รายการ' : 'ทั้งหมด '+items.length+' รายการ (แตะเพื่อดูรายละเอียด)';
+    var html='', lastGroup='';
+    items.forEach(function(p){
+      if(p.name!==lastGroup){ lastGroup=p.name; html+='<div class="lgroup">'+esc(p.name)+'</div>'; }
+      html+=itemHtml(p, q);
+    });
+    $('listBody').innerHTML = html || '<div class="empty">ไม่พบรายการที่ตรงกับ “'+esc(q)+'”</div>';
+    bindItems($('listBody'));
+  }
+  $('listFilter').addEventListener('input',function(){
+    $('listClear').classList.toggle('show', !!this.value);
+    renderList(this.value);
+  });
+  $('listClear').addEventListener('click',function(){ $('listFilter').value=''; this.classList.remove('show'); renderList(''); });
+
+  /* ================= partial-barcode search view ================= */
+  function renderBcSearch(q){
+    q = normalize(q);
+    var body=$('bcBody'), cnt=$('bcCount');
+    if(!q){ cnt.textContent=''; body.innerHTML='<div class="empty">พิมพ์ตัวเลขบางส่วนของบาร์โค้ด<br>เช่น เลขท้าย 4–5 หลักบนฉลาก</div>'; return; }
+    var items = PRODUCTS.filter(function(p){ return p.barcode.indexOf(q)>-1; });
+    // rank: endsWith first (labels usually show the tail), then position
+    items.sort(function(a,b){
+      var ae=a.barcode.endsWith(q)?0:1, be=b.barcode.endsWith(q)?0:1;
+      if(ae!==be) return ae-be;
+      return a.barcode.indexOf(q)-b.barcode.indexOf(q);
+    });
+    var MAX=60;
+    cnt.textContent = 'พบ '+items.length+' รายการ'+(items.length>MAX?' (แสดง '+MAX+' รายการแรก — พิมพ์เพิ่มเพื่อกรอง)':'');
+    body.innerHTML = items.slice(0,MAX).map(function(p){ return itemHtml(p,q); }).join('')
+      || '<div class="empty">ไม่พบบาร์โค้ดที่มี “'+esc(q)+'”</div>';
+    bindItems(body);
+  }
+  $('bcSearch').addEventListener('input',function(){
+    $('bcClear').classList.toggle('show', !!this.value);
+    renderBcSearch(this.value);
+  });
+  $('bcClear').addEventListener('click',function(){ $('bcSearch').value=''; this.classList.remove('show'); renderBcSearch(''); });
+
+  /* ================= detail bottom sheet ================= */
+  function openDetail(code){
+    var p=index[code]; if(!p) return;
+    $('sheetBody').innerHTML = foundCardHtml(code,p);
+    $('detailOverlay').classList.add('show');
+  }
+  $('sheetClose').addEventListener('click',function(){ $('detailOverlay').classList.remove('show'); });
+  $('detailOverlay').addEventListener('click',function(ev){ if(ev.target===this) this.classList.remove('show'); });
+
+  /* ================= CSV live sync (locked source) ================= */
+  function parseCSV(text){
+    var rows=[], row=[], cur='', q=false;
+    for(var i=0;i<text.length;i++){
+      var ch=text[i];
+      if(q){ if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+      else{ if(ch==='"')q=true; else if(ch===','){row.push(cur);cur='';}
+        else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur='';}
+        else if(ch==='\r'){} else cur+=ch; }
+    }
+    if(cur!==''||row.length){row.push(cur);rows.push(row);}
+    return rows;
+  }
+  function mapHeader(headers){
+    var h=headers.map(function(x){return String(x).toLowerCase().trim();});
+    function find(preds){ for(var i=0;i<h.length;i++){ if(preds(h[i],i))return i; } return -1; }
+    return {
+      barcode: find(function(x){return x.indexOf('barcode')>-1||x.indexOf('gtin')>-1;}),
+      name:    find(function(x){return x.indexOf('product name')>-1||x==='name';}),
+      size:    find(function(x){return x.indexOf('core')>-1||x.indexOf('size')>-1;}),
+      conductor:find(function(x){return x.indexOf('conductor')>-1;}),
+      code:    find(function(x){return x.indexOf('product code')>-1||(x.indexOf('code')>-1&&x.indexOf('barcode')<0&&x.indexOf('5')<0);}),
+      colour:  find(function(x){return x.indexOf('colour')>-1||x.indexOf('color')>-1;}),
+      packing: find(function(x){return x.indexOf('packing')>-1||x.indexOf('pack')>-1;})
+    };
+  }
+  function pick(c,i){ return (i>-1&&c[i]!=null)?String(c[i]).trim():''; }
+  function syncFromSheet(){
+    var url = (CSV_URL||'').trim();
+    if(!url){ return; }
+    toast('กำลังอัปเดต…');
+    fetch(url,{cache:'no-store'}).then(function(r){return r.text();}).then(function(txt){
+      var rows=parseCSV(txt).filter(function(r){return r.join('').trim()!=='';});
+      var hi=-1; for(var i=0;i<rows.length;i++){ if(rows[i].join('|').toLowerCase().indexOf('barcode')>-1){hi=i;break;} }
+      if(hi<0){ toast('อ่านหัวตารางไม่เจอ'); return; }
+      var m=mapHeader(rows[hi]); var out=[];
+      for(var r=hi+1;r<rows.length;r++){
+        var c=rows[r]; var bc=(m.barcode>-1?c[m.barcode]:'').trim();
+        if(!/^\d{6,}$/.test(bc)) continue;
+        out.push({barcode:bc,
+          name:pick(c,m.name),size:pick(c,m.size),conductor:pick(c,m.conductor),
+          code:pick(c,m.code),colour:pick(c,m.colour),packing:pick(c,m.packing)});
+      }
+      if(!out.length){ toast('ไม่พบข้อมูลในชีต'); return; }
+      PRODUCTS=out; buildIndex(PRODUCTS); toast('อัปเดตแล้ว: '+out.length+' รายการ');
+    }).catch(function(e){ toast('อัปเดตไม่สำเร็จ — ใช้ข้อมูลในเครื่องต่อ'); console.warn(e); });
+  }
+  $('syncBtn').addEventListener('click',syncFromSheet);
+
+  /* ================= init ================= */
+  buildIndex(PRODUCTS);
+  if(CSV_URL) syncFromSheet();
+})();
+</script>
+</body>
+</html>
